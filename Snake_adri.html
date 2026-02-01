@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Snake: Beer Rush (mobilbarát)</title>
+  <style>
+    :root {
+      --bg: #1b4fbf;     /* kék háttér */
+      --panel: rgba(0,0,0,0.25);
+      --text: #ffffff;
+    }
+
+    html, body {
+      height: 100%;
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      color: var(--text);
+      background: #0b1b3a;
+      display: grid;
+      place-items: center;
+      overscroll-behavior: none;
+      touch-action: manipulation;
+    }
+
+    .wrap { width: min(900px, 95vw); }
+
+    .hud {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+      padding: 10px 12px;
+      background: var(--panel);
+      border-radius: 12px;
+    }
+
+    .hud .left, .hud .right {
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .pill {
+      background: rgba(255,255,255,0.14);
+      border: 1px solid rgba(255,255,255,0.18);
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 14px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      user-select: none;
+    }
+
+    .stage { position: relative; }
+
+    canvas {
+      width: 100%;
+      aspect-ratio: 16 / 10;
+      background: var(--bg);
+      border-radius: 14px;
+      display: block;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+      user-select: none;
+      -webkit-user-select: none;
+
+      /* kulcs: mobilon a swipe-ot a játéknak adjuk, ne a böngésző görgessen/zoomoljon */
+      touch-action: none;
+    }
+
+    .hint {
+      margin-top: 10px;
+      font-size: 13px;
+      opacity: 0.9;
+      line-height: 1.4;
+    }
+
+    .kbd {
+      padding: 2px 7px;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.25);
+      background: rgba(0,0,0,0.18);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+    }
+
+    /* Overlay */
+    .overlay {
+      position: absolute;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 18px;
+    }
+    .overlay.show { display: flex; }
+
+    .card {
+      background: rgba(0,0,0,0.45);
+      border: 1px solid rgba(255,255,255,0.18);
+      backdrop-filter: blur(6px);
+      border-radius: 16px;
+      padding: 18px 18px 16px;
+      width: min(520px, 92%);
+      box-shadow: 0 18px 45px rgba(0,0,0,0.35);
+    }
+    .card h1 { margin: 0 0 6px; font-size: 26px; }
+    .card p { margin: 6px 0 12px; opacity: 0.95; }
+
+    .btn {
+      appearance: none;
+      border: 0;
+      background: rgba(255,255,255,0.16);
+      color: white;
+      padding: 10px 14px;
+      border-radius: 12px;
+      cursor: pointer;
+      font-weight: 700;
+      border: 1px solid rgba(255,255,255,0.2);
+    }
+    .btn:hover { background: rgba(255,255,255,0.22); }
+
+    /* Mobil iránygombok (csak érintős eszközön jelennek meg) */
+    .controls {
+      margin-top: 12px;
+      display: none; /* JS bekapcsolja touch eszközön */
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      align-items: center;
+      justify-items: center;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .controls button {
+      width: 100%;
+      padding: 14px 10px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.18);
+      background: rgba(255,255,255,0.14);
+      color: white;
+      font-size: 20px;
+      font-weight: 800;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .controls button:active { transform: scale(0.98); }
+
+    .controls .spacer { opacity: 0; }
+
+    /* Telefonon legyen kényelmesebb: nagyobb gomb, kevesebb “padding” */
+    @media (max-width: 520px) {
+      .pill { font-size: 13px; }
+      .controls button { font-size: 22px; padding: 16px 10px; }
+      .hint { font-size: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hud">
+      <div class="left">
+        <div class="pill"><strong>Idő</strong> <span id="time">60</span>s</div>
+        <div class="pill"><strong>Élet</strong> <span id="lives">3</span></div>
+        <div class="pill"><strong>Sör</strong> <span id="beer">0</span>/<span id="beerTotal">0</span></div>
+      </div>
+      <div class="right">
+        <div class="pill"><span>Pizza:</span> <strong>+10s</strong></div>
+      </div>
+    </div>
+
+    <div class="stage">
+      <canvas id="game" width="800" height="500" aria-label="Snake Game"></canvas>
+
+      <div id="overlay" class="overlay show">
+        <div class="card">
+          <h1>Snake: Beer Rush</h1>
+          <p>
+            Gyűjtsd be az összes <strong>sört</strong>, mielőtt lejár az idő.
+            A pizza <strong>+10 másodperc</strong>. Mindkettőtől nő a kígyó.
+          </p>
+          <p>
+            <strong>PC:</strong> <span class="kbd">↑</span> <span class="kbd">↓</span> <span class="kbd">←</span> <span class="kbd">→</span><br>
+            <strong>Telefon:</strong> húzd (swipe) az ujjad a pályán <em>vagy</em> használd a lenti gombokat.
+          </p>
+          <button id="startBtn" class="btn">Indítás</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Mobil / érintős irányítás (touch eszközön látszik) -->
+    <div id="controls" class="controls" aria-label="Mobil iránygombok">
+      <div class="spacer">.</div>
+      <button id="btnUp" type="button" aria-label="Fel">↑</button>
+      <div class="spacer">.</div>
+
+      <button id="btnLeft" type="button" aria-label="Balra">←</button>
+      <button id="btnDown" type="button" aria-label="Le">↓</button>
+      <button id="btnRight" type="button" aria-label="Jobbra">→</button>
+    </div>
+
+    <div class="hint">
+      Kék pálya, piros fej, zöld test. Nem mehetsz a saját testedbe.
+      Falba ütközés: -1 élet. Nyerés: minden sör összegyűjtése 0 idő előtt.
+    </div>
+  </div>
+
+  <script>
+    // ------------------------------------
+    // Snake (mobilon is játszható):
+    // - érintés: swipe a canvasen
+    // - érintés: iránygombok (csak touch eszközön)
+    // ------------------------------------
+
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+
+    const uiTime = document.getElementById("time");
+    const uiLives = document.getElementById("lives");
+    const uiBeer = document.getElementById("beer");
+    const uiBeerTotal = document.getElementById("beerTotal");
+
+    const overlay = document.getElementById("overlay");
+    const startBtn = document.getElementById("startBtn");
+
+    const controls = document.getElementById("controls");
+    const btnUp = document.getElementById("btnUp");
+    const btnDown = document.getElementById("btnDown");
+    const btnLeft = document.getElementById("btnLeft");
+    const btnRight = document.getElementById("btnRight");
+
+    // Touch eszköz felismerése → mobil gombok megjelenítése
+    const isTouchDevice =
+      ("ontouchstart" in window) ||
+      (navigator.maxTouchPoints && navigator.maxTouchPoints > 0) ||
+      (navigator.msMaxTouchPoints && navigator.msMaxTouchPoints > 0);
+
+    if (isTouchDevice) controls.style.display = "grid";
+
+    // Grid
+    const CELL = 20;
+    const COLS = Math.floor(canvas.width / CELL);
+    const ROWS = Math.floor(canvas.height / CELL);
+
+    // Config
+    const START_LIVES = 3;
+    const START_TIME = 60;
+    const PIZZA_BONUS = 10;
+    const TICK_MS = 120;
+
+    const BEER_COUNT = 6;
+    const PIZZA_COUNT = 3;
+
+    // State
+    let snake = [];
+    let dir = { x: 1, y: 0 };
+    let nextDir = { x: 1, y: 0 };
+
+    let walls = [];
+    let beers = [];
+    let pizzas = [];
+
+    let lives = START_LIVES;
+    let timeLeft = START_TIME;
+    let beerCollected = 0;
+
+    let gameState = "menu"; // menu | playing | win | gameover
+    let tickTimer = null;
+    let clockTimer = null;
+
+    // Helpers
+    function sameCell(a, b) { return a.x === b.x && a.y === b.y; }
+    function inBounds(p) { return p.x >= 0 && p.x < COLS && p.y >= 0 && p.y < ROWS; }
+    function hasCell(list, cell) { return list.some(c => sameCell(c, cell)); }
+
+    function randomEmptyCell() {
+      for (let tries = 0; tries < 2000; tries++) {
+        const p = { x: Math.floor(Math.random() * COLS), y: Math.floor(Math.random() * ROWS) };
+        if (hasCell(snake, p)) continue;
+        if (hasCell(walls, p)) continue;
+        if (hasCell(beers, p)) continue;
+        if (hasCell(pizzas, p)) continue;
+        return p;
+      }
+      return { x: 1, y: 1 };
+    }
+
+    function buildWalls() {
+      walls = [];
+
+      // Border
+      for (let x = 0; x < COLS; x++) {
+        walls.push({ x, y: 0 });
+        walls.push({ x, y: ROWS - 1 });
+      }
+      for (let y = 0; y < ROWS; y++) {
+        walls.push({ x: 0, y });
+        walls.push({ x: COLS - 1, y });
+      }
+
+      // Interior walls
+      for (let x = 6; x < COLS - 6; x++) walls.push({ x, y: 6 });
+
+      for (let y = 9; y < ROWS - 4; y++) {
+        if (y === 13 || y === 14) continue;
+        walls.push({ x: 10, y });
+      }
+
+      for (let x = COLS - 9; x < COLS - 6; x++) {
+        for (let y = 12; y < 15; y++) walls.push({ x, y });
+      }
+    }
+
+    function syncUI() {
+      uiTime.textContent = String(timeLeft);
+      uiLives.textContent = String(lives);
+      uiBeer.textContent = String(beerCollected);
+      uiBeerTotal.textContent = String(BEER_COUNT);
+    }
+
+    function resetGame() {
+      lives = START_LIVES;
+      timeLeft = START_TIME;
+      beerCollected = 0;
+
+      dir = { x: 1, y: 0 };
+      nextDir = { x: 1, y: 0 };
+
+      buildWalls();
+
+      const start = { x: 3, y: Math.floor(ROWS / 2) };
+      snake = [
+        { x: start.x, y: start.y },
+        { x: start.x - 1, y: start.y },
+        { x: start.x - 2, y: start.y }
+      ];
+
+      beers = [];
+      pizzas = [];
+      for (let i = 0; i < BEER_COUNT; i++) beers.push(randomEmptyCell());
+      for (let i = 0; i < PIZZA_COUNT; i++) pizzas.push(randomEmptyCell());
+
+      syncUI();
+    }
+
+    function stopTimers() {
+      if (tickTimer) clearInterval(tickTimer);
+      if (clockTimer) clearInterval(clockTimer);
+      tickTimer = null;
+      clockTimer = null;
+    }
+
+    function hideOverlay() { overlay.classList.remove("show"); }
+
+    function escapeHtml(str) {
+      return String(str).replace(/[&<>"']/g, s => ({
+        "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"
+      }[s]));
+    }
+
+    function showOverlay(html) {
+      overlay.innerHTML = html;
+      overlay.classList.add("show");
+      const btn = overlay.querySelector("button[data-action='start']");
+      if (btn) btn.addEventListener("click", startGame);
+    }
+
+    function setWin() {
+      gameState = "win";
+      stopTimers();
+      draw();
+      showOverlay(`
+        <div class="card">
+          <h1>🏆 Nyertél!</h1>
+          <p>Összegyűjtötted az összes sört, mielőtt lejárt az idő.</p>
+          <p><strong>Hátralévő idő:</strong> ${timeLeft}s &nbsp;|&nbsp; <strong>Élet:</strong> ${lives}</p>
+          <button class="btn" data-action="start">Újra</button>
+        </div>
+      `);
+    }
+
+    function setGameOver(reason) {
+      gameState = "gameover";
+      stopTimers();
+      draw();
+      showOverlay(`
+        <div class="card">
+          <h1>Game Over</h1>
+          <p>${escapeHtml(reason)}</p>
+          <p><strong>Sör:</strong> ${beerCollected}/${BEER_COUNT}</p>
+          <button class="btn" data-action="start">Újra</button>
+        </div>
+      `);
+    }
+
+    function startGame() {
+      resetGame();
+      gameState = "playing";
+      hideOverlay();
+
+      stopTimers();
+
+      tickTimer = setInterval(step, TICK_MS);
+
+      clockTimer = setInterval(() => {
+        if (gameState !== "playing") return;
+        timeLeft = Math.max(0, timeLeft - 1);
+        syncUI();
+
+        if (timeLeft === 0) {
+          if (beerCollected >= BEER_COUNT) setWin();
+          else setGameOver("Lejárt az idő!");
+        }
+      }, 1000);
+
+      draw();
+    }
+
+    // Irány beállítás (közös: billentyűzet + mobil)
+    function setDirection(newDir) {
+      if (gameState === "menu") { startGame(); return; }
+      if (gameState !== "playing") return;
+
+      // Ne lehessen azonnal 180 fokos fordulat
+      if (newDir.x === -dir.x && newDir.y === -dir.y) return;
+      nextDir = newDir;
+    }
+
+    // Billentyűzet
+    window.addEventListener("keydown", (e) => {
+      const key = e.key;
+      if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(key)) e.preventDefault();
+
+      if (key === "ArrowUp") setDirection({ x: 0, y: -1 });
+      if (key === "ArrowDown") setDirection({ x: 0, y: 1 });
+      if (key === "ArrowLeft") setDirection({ x: -1, y: 0 });
+      if (key === "ArrowRight") setDirection({ x: 1, y: 0 });
+    });
+
+    // Mobil gombok
+    function bindButton(btn, d) {
+      const handler = (e) => { e.preventDefault(); setDirection(d); };
+      btn.addEventListener("click", handler);
+      btn.addEventListener("touchstart", handler, { passive: false });
+    }
+    bindButton(btnUp, { x: 0, y: -1 });
+    bindButton(btnDown, { x: 0, y: 1 });
+    bindButton(btnLeft, { x: -1, y: 0 });
+    bindButton(btnRight, { x: 1, y: 0 });
+
+    // Swipe a canvasen (telefonos irányítás)
+    let touchStart = null;
+    const SWIPE_MIN_PX = 18;
+
+    canvas.addEventListener("touchstart", (e) => {
+      e.preventDefault();
+      const t = e.changedTouches[0];
+      touchStart = { x: t.clientX, y: t.clientY };
+    }, { passive: false });
+
+    canvas.addEventListener("touchend", (e) => {
+      e.preventDefault();
+      if (!touchStart) return;
+
+      const t = e.changedTouches[0];
+      const dx = t.clientX - touchStart.x;
+      const dy = t.clientY - touchStart.y;
+      touchStart = null;
+
+      const adx = Math.abs(dx);
+      const ady = Math.abs(dy);
+      if (Math.max(adx, ady) < SWIPE_MIN_PX) return;
+
+      if (adx > ady) setDirection(dx > 0 ? { x: 1, y: 0 } : { x: -1, y: 0 });
+      else setDirection(dy > 0 ? { x: 0, y: 1 } : { x: 0, y: -1 });
+    }, { passive: false });
+
+    // (Extra) Mobilon kattintás a vászonra indítson a menüből
+    canvas.addEventListener("pointerdown", (e) => {
+      if (gameState === "menu") startGame();
+    });
+
+    startBtn.addEventListener("click", startGame);
+
+    // Játék lépés
+    function step() {
+      if (gameState !== "playing") return;
+
+      dir = nextDir;
+      const head = snake[0];
+      const newHead = { x: head.x + dir.x, y: head.y + dir.y };
+
+      // Fal vagy pályán kívül: -1 élet, respawn
+      if (hasCell(walls, newHead) || !inBounds(newHead)) {
+        lives--;
+        syncUI();
+
+        if (lives <= 0) {
+          setGameOver("Elfogytak az életeid!");
+          return;
+        }
+
+        respawnSnake();
+        draw();
+        return;
+      }
+
+      // Saját test
+      if (hasCell(snake, newHead)) {
+        setGameOver("Bementél a saját testedbe!");
+        return;
+      }
+
+      snake.unshift(newHead);
+
+      let grew = false;
+
+      const pizzaIndex = pizzas.findIndex(p => sameCell(p, newHead));
+      if (pizzaIndex !== -1) {
+        pizzas.splice(pizzaIndex, 1);
+        timeLeft += PIZZA_BONUS;
+        grew = true;
+        syncUI();
+      }
+
+      const beerIndex = beers.findIndex(b => sameCell(b, newHead));
+      if (beerIndex !== -1) {
+        beers.splice(beerIndex, 1);
+        beerCollected++;
+        grew = true;
+        syncUI();
+
+        if (beerCollected >= BEER_COUNT) {
+          setWin();
+          return;
+        }
+      }
+
+      if (!grew) snake.pop();
+      draw();
+    }
+
+    function respawnSnake() {
+      dir = { x: 1, y: 0 };
+      nextDir = { x: 1, y: 0 };
+
+      const start = { x: 3, y: Math.floor(ROWS / 2) };
+      snake = [
+        { x: start.x, y: start.y },
+        { x: start.x - 1, y: start.y },
+        { x: start.x - 2, y: start.y }
+      ];
+
+      // ha valamiért falon állna
+      if (snake.some(s => hasCell(walls, s))) {
+        const p = randomEmptyCell();
+        snake = [
+          { x: p.x, y: p.y },
+          { x: p.x - 1, y: p.y },
+          { x: p.x - 2, y: p.y }
+        ];
+      }
+    }
+
+    // Rajzolás
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawGrid();
+
+      for (const w of walls) drawCell(w.x, w.y, "#2a2a2a");
+
+      for (const p of pizzas) {
+        drawCell(p.x, p.y, "#f7d354");
+        dot(p.x, p.y, 0.28, 0.30, "#d24b4b");
+        dot(p.x, p.y, 0.62, 0.62, "#d24b4b");
+      }
+
+      for (const b of beers) {
+        drawCell(b.x, b.y, "#e3a53b");
+        drawCellPartial(b.x, b.y, 0, 0, 1, 0.25, "rgba(255,255,255,0.9)");
+      }
+
+      snake.forEach((s, i) => {
+        drawCell(s.x, s.y, i === 0 ? "#e53935" : "#2e7d32");
+      });
+
+      if (gameState === "win" || gameState === "gameover" || gameState === "menu") {
+        ctx.fillStyle = "rgba(0,0,0,0.05)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
+    }
+
+    function drawGrid() {
+      ctx.save();
+      ctx.globalAlpha = 0.12;
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 1;
+
+      for (let x = 0; x <= COLS; x++) {
+        ctx.beginPath();
+        ctx.moveTo(x * CELL, 0);
+        ctx.lineTo(x * CELL, canvas.height);
+        ctx.stroke();
+      }
+      for (let y = 0; y <= ROWS; y++) {
+        ctx.beginPath();
+        ctx.moveTo(0, y * CELL);
+        ctx.lineTo(canvas.width, y * CELL);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function drawCell(x, y, color) {
+      ctx.fillStyle = color;
+      const pad = 2;
+      ctx.fillRect(x * CELL + pad, y * CELL + pad, CELL - pad * 2, CELL - pad * 2);
+    }
+
+    function drawCellPartial(x, y, rx, ry, rw, rh, color) {
+      ctx.fillStyle = color;
+      const pad = 2;
+      const px = x * CELL + pad;
+      const py = y * CELL + pad;
+      const w = CELL - pad * 2;
+      const h = CELL - pad * 2;
+      ctx.fillRect(px + rx * w, py + ry * h, rw * w, rh * h);
+    }
+
+    function dot(x, y, nx, ny, color) {
+      const pad = 2;
+      const px = x * CELL + pad;
+      const py = y * CELL + pad;
+      const w = CELL - pad * 2;
+      const h = CELL - pad * 2;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(px + nx * w, py + ny * h, Math.min(w, h) * 0.12, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Init
+    function init() {
+      resetGame();
+      gameState = "menu";
+      draw();
+    }
+
+    init();
+  </script>
+</body>
+</html>
